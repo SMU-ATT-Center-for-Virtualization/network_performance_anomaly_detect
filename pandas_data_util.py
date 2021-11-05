@@ -62,6 +62,8 @@ class DataUtil(object):
     one_hot_ip_type = pd.get_dummies(df['ip_type'], dtype='float')
     df = df.join(one_hot_ip_type)
     
+    df['vm_1_os_info_trunc'] = df['vm_1_os_info'].str.extract(r'(\w+\s+\d+.\d+).\d+\s+\w+')
+    
     # TODO rethink how are are normalizing data
     # maybe we want to do it per group?
     # normalize data
@@ -92,7 +94,8 @@ class DataUtil(object):
                      'tcp_max_receive_buffer',
                      'vm_1_machine_type',
                      'ip_type',
-                     'tcp_congestion_control'], 
+                     'tcp_congestion_control',
+                     'vm_1_os_info_trunc'], 
                     as_index=False)[[
                                       # 'thedate',
                                       # 'sending_zone',
@@ -109,6 +112,7 @@ class DataUtil(object):
                                       'external',
                                       'internal',
                                       'tcp_congestion_control',
+                                      'vm_1_os_info_trunc'
                                     ]]
     self.groups = list(gb.groups)
 
