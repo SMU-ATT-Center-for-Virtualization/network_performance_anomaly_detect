@@ -64,6 +64,11 @@ class DataUtil(object):
     
     df['vm_1_os_info_trunc'] = df['vm_1_os_info'].str.extract(r'(\w+\s+\d+.\d+).\d+\s+\w+')
     
+    one_hot_congestion_control = pd.get_dummies(df['tcp_congestion_control'], dtype='float')
+    df = df.join(one_hot_congestion_control)
+    one_hot_vm_1_os_info_trunc = pd.get_dummies(df['vm_1_os_info_trunc'], dtype='float')
+    df = df.join(one_hot_vm_1_os_info_trunc)
+    
     # TODO rethink how are are normalizing data
     # maybe we want to do it per group?
     # normalize data
@@ -105,12 +110,12 @@ class DataUtil(object):
                                       'iperf_throughput_32_threads',
                                       'tcp_max_receive_buffer',
                                       'ping_average_latency',
-    #                                   'vm_1_machine_type',
-    #                                   'ip_type',
-                                      'n1-standard-16',
-                                      'n1-standard-2',
-                                      'external',
-                                      'internal',
+                                      'n1-standard-16', 'n1-standard-2',
+                                      'external', 'internal',
+                                      'bbr', 'cubic',
+                                      'Ubuntu 14.04', 'Ubuntu 16.04', 'Ubuntu 18.04', 'Ubuntu 20.04',
+                                      'vm_1_machine_type',
+                                      'ip_type',
                                       'tcp_congestion_control',
                                       'vm_1_os_info_trunc'
                                     ]]
