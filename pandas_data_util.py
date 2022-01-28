@@ -46,8 +46,8 @@ class DataUtil(object):
                                         'vm_2_gce_network_tier']].fillna(value='premium')
     df[['tcp_max_receive_buffer']] = df[['tcp_max_receive_buffer']].fillna(value=6291456)
     # df = df.set_index('thedate')
-    # query = 'vm_1_machine_type == "n1-standard-16" and ip_type == "internal" and vm_1_gce_network_tier == "premium"'
-    # df = df.query(query)
+    query = 'vm_1_gce_network_tier == "premium"'
+    df = df.query(query)
     df = df[df['iperf_throughput_1_thread'].notnull()]
     df = df[df['ping_average_latency'].notnull()]
     df = df[df['sending_zone'].notnull()]
@@ -57,18 +57,20 @@ class DataUtil(object):
     df[['pandas_datetime']] = pd.to_datetime(df.thedate)
     df.sort_values(by=['iperf_timestamp', 'run_uri'], inplace=True, ascending=True)
     df = df.set_index('thedate')
-    one_hot_machine_type = pd.get_dummies(df['vm_1_machine_type'], dtype='float')
+    one_hot_machine_type = pd.get_dummies(df['vm_1_machine_type'], dtype='float32')
     df = df.join(one_hot_machine_type)
-    one_hot_ip_type = pd.get_dummies(df['ip_type'], dtype='float')
+    one_hot_ip_type = pd.get_dummies(df['ip_type'], dtype='float32')
     df = df.join(one_hot_ip_type)
     
     df['vm_1_os_info_trunc'] = df['vm_1_os_info'].str.extract(r'(\w+\s+\d+.\d+).\d+\s+\w+')
     
-    one_hot_congestion_control = pd.get_dummies(df['tcp_congestion_control'], dtype='float')
+    one_hot_congestion_control = pd.get_dummies(df['tcp_congestion_control'], dtype='float32')
     df = df.join(one_hot_congestion_control)
-    one_hot_vm_1_os_info_trunc = pd.get_dummies(df['vm_1_os_info_trunc'], dtype='float')
+    one_hot_vm_1_os_info_trunc = pd.get_dummies(df['vm_1_os_info_trunc'], dtype='float32')
     df = df.join(one_hot_vm_1_os_info_trunc)
     
+    
+    print(df.columns)
     # TODO rethink how are are normalizing data
     # maybe we want to do it per group?
     # normalize data
@@ -76,7 +78,6 @@ class DataUtil(object):
     df[['ping_average_latency']] = df[['ping_average_latency']] - mean
     std = df['ping_average_latency'].std(axis=0)
     df[['ping_average_latency']] /= std
-
 
     mean = df['iperf_throughput_1_thread'].mean(axis=0)
     df[['iperf_throughput_1_thread']] = df[['iperf_throughput_1_thread']] - mean
@@ -92,6 +93,37 @@ class DataUtil(object):
     df[['tcp_max_receive_buffer']] = df[['tcp_max_receive_buffer']] - mean
     std = df['tcp_max_receive_buffer'].std(axis=0)
     df[['tcp_max_receive_buffer']] /= std
+    
+    mean = df['n1-standard-2'].mean(axis=0)
+    df[['n1-standard-2']] = df[['n1-standard-2']] - mean
+    std = df['n1-standard-2'].std(axis=0)
+    df[['n1-standard-2']] /= std
+    
+    mean = df['n1-standard-16'].mean(axis=0)
+    df[['n1-standard-16']] = df[['n1-standard-16']] - mean
+    std = df['n1-standard-16'].std(axis=0)
+    df[['n1-standard-16']] /= std
+    
+    mean = df['external'].mean(axis=0)
+    df[['external']] = df[['external']] - mean
+    std = df['external'].std(axis=0)
+    df[['external']] /= std
+    
+    mean = df['internal'].mean(axis=0)
+    df[['internal']] = df[['internal']] - mean
+    std = df['internal'].std(axis=0)
+    df[['internal']] /= std
+    
+    mean = df['bbr'].mean(axis=0)
+    df[['bbr']] = df[['bbr']] - mean
+    std = df['bbr'].std(axis=0)
+    df[['bbr']] /= std
+    
+    mean = df['cubic'].mean(axis=0)
+    df[['cubic']] = df[['bbr']] - mean
+    std = df['cubic'].std(axis=0)
+    df[['cubic']] /= std
+    
 
     # sort and group
     gb = df.groupby(['sending_zone',
@@ -102,7 +134,7 @@ class DataUtil(object):
                      'tcp_congestion_control',
                      'vm_1_os_info_trunc'], 
                     as_index=False)[[
-                                      # 'thedate',
+#                                       'thedate',
                                       # 'sending_zone',
                                       # 'receiving_zone',
                                       'pandas_datetime',
@@ -293,6 +325,7 @@ class DataUtil(object):
     
     # Max time delta = 30 hours
     max_time_delta_sec = 30 * 60 * 60
+    min_time_delta_sec = 20 * 60 * 60
 
     for group_list_position in range(0,len(group_list)):
       # cycle through groups in dataframe
@@ -324,6 +357,9 @@ class DataUtil(object):
           difference = sample[sample_index][0] - sample[sample_index-1][0]
           delta_in_seconds = difference.total_seconds()
           if delta_in_seconds > max_time_delta_sec:
+            bad_sample = True
+            break
+          elif delta_in_seconds < min_time_delta_sec:
             bad_sample = True
             break
         if bad_sample:
