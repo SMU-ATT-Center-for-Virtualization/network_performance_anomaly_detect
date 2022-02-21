@@ -1,2 +1,2 @@
-model_checkpoint_path: "linear_weights"
-all_model_checkpoint_paths: "linear_weights"
+model_checkpoint_path: "lstm_weights"
+all_model_checkpoint_paths: "lstm_weights"
