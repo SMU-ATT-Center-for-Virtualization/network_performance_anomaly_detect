@@ -188,12 +188,20 @@ def build_model(
     return keras.Model(inputs, outputs)
 
 #f = open("TransformerResults2.txt", "w")
+#Default values used for printing
+head_size=4
+num_heads=4 #This is where the default x is
+ff_dim=4
+num_transformer_blocks=4
+mlp_units=[128]
+mlp_dropout=0.4
+dropout=0.25
+#
 results = []
 testing_head_size = [4,2,3,5,6]
 testing_num_heads = [4,3] #[4,2,3,5,6]
 testing_ff_dim = [4,3,4,5,6]
 testing_num_transformer_blocks = [4,6] #[2,3,4,5,6]
-results.append("Testing_Num_Heads[4,3]")
 for x in testing_num_heads: #testing_num_heads can be substituted for any array you want to test for. Just change x below to account for different values
     tempResults = []
     
@@ -208,8 +216,8 @@ for x in testing_num_heads: #testing_num_heads can be substituted for any array 
         mlp_dropout=0.4,
         dropout=0.25,
     )
-    testCase = "num_heads " + str(x)
-    tempResults.append(testCase)
+    tempResults.append(f"head_size={head_size}, num_heads={x}, ff_dim={ff_dim}, num_transformer_blocks={num_transformer_blocks}, mlp_units={mlp_units}, mlp_dropout={mlp_dropout}, dropout={dropout}")
+
 
     model.compile(
         loss=tf.losses.MeanSquaredError(),
