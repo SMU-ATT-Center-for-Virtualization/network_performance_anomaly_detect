@@ -7,6 +7,33 @@ logger_name = 'UTIL LOGGER'
 import logging
 log = logging.getLogger(logger_name)
 
+zone_time_map = {
+  'asia-east1': 'Asia/Taipei',
+  'asia-east2': 'Asia/Hong_Kong',
+  'asia-northeast1': 'Asia/Tokyo',
+  'asia-northeast2': 'Asia/Tokyo',
+  'asia-northeast3': 'Asia/Seoul',
+  'asia-south1': 'Asia/Kolkata',
+  'asia-southeast1': 'Asia/Singapore',
+  'asia-southeast2': 'Asia/Jakarta',
+  'australia-southeast1': 'Australia/Sydney',
+  'europe-north1': 'Europe/Helsinki',
+  'europe-west1': 'Europe/Brussels',
+  'europe-west2': 'Europe/London',
+  'europe-west3': 'Europe/Berlin',
+  'europe-west4': 'Europe/Amsterdam',
+  'europe-west6': 'Europe/Zurich',
+  'northamerica-northeast1': 'America/Montreal',
+  'southamerica-east1': 'America/Sao_Paulo',
+  'us-central1': 'US/Central',
+  'us-east1': 'US/Eastern',
+  'us-east4': 'US/Eastern',
+  'us-west1': 'US/Pacific',
+  'us-west2': 'US/Pacific',
+  'us-west3': 'US/Mountain',
+  'us-west4': 'US/Pacific'
+}
+
 def min_percent_index(num, percent, offset):
     min_index = round((num-1)*percent) + offset
     if min_index >= num:
@@ -18,6 +45,11 @@ def max_percent_index(num, percent, offset):
     if max_index >= num:
         max_index = num-1
     return max_index
+
+def kernel_version(kernel_release):
+    kernel_split = kernel_release.split('.')
+    version = float(kernel_split[0] + '.' + kernel_split[1])
+    return version
 
 class DataUtil(object):
   #
@@ -34,7 +66,7 @@ class DataUtil(object):
   #     - X [number of samples, window, number of multivariate time series]
   #     - Y [number of samples, number of multivariate time series]
     
-  def __init__(self, filename, train, valid, horizon, window, normalize = 0):
+  def __init__(self, filename, train, valid, horizon, window, normalize = 0, query='vm_1_gce_network_tier == "premium"'):
 
     df = pd.read_csv(filename, dtype={"ping_average_latency": float, 
                                       "iperf_throughput_1_thread": float,
@@ -46,15 +78,49 @@ class DataUtil(object):
                                         'vm_2_gce_network_tier']].fillna(value='premium')
     df[['tcp_max_receive_buffer']] = df[['tcp_max_receive_buffer']].fillna(value=6291456)
     # df = df.set_index('thedate')
-    query = 'vm_1_gce_network_tier == "premium"'
-    df = df.query(query)
+    
+    # Filter the data to what we want
+    
     df = df[df['iperf_throughput_1_thread'].notnull()]
     df = df[df['ping_average_latency'].notnull()]
     df = df[df['sending_zone'].notnull()]
     df = df[df['receiving_zone'].notnull()]
     # df = df[df['vm_1_cloud'].notnull()]
     # df = df[df['vm_2_cloud'].notnull()]
-    df[['pandas_datetime']] = pd.to_datetime(df.thedate)
+    df[['pandas_datetime']] = df[['thedate']].apply(pd.to_datetime)
+    
+    # Reduce dataset to just recent where it is more stable
+    df = df[df['pandas_datetime'] > '03/03/2022']
+    df.reset_index(inplace=True,drop=True)
+    
+    # Get local time
+    df['sending_zone_datetime'] = df.apply(lambda row: row['pandas_datetime'].tz_convert(zone_time_map[row['sending_zone'][:-2]]), axis=1)
+    df['receiving_zone_datetime'] = df.apply(lambda row: row['pandas_datetime'].tz_convert(zone_time_map[row['receiving_zone'][:-2]]), axis=1)
+
+    # Remove timezone data
+    df['sending_zone_datetime'] = df.apply(lambda row: pd.to_datetime(row['sending_zone_datetime'].tz_localize(None).strftime("%Y/%m/%d, %H:%M:%S")), axis=1)
+    df['receiving_zone_datetime'] = df.apply(lambda row: pd.to_datetime(row['receiving_zone_datetime'].tz_localize(None).strftime("%Y/%m/%d, %H:%M:%S")), axis=1)
+    
+    # extract hour of the day and day of the week
+    df['sending_zone_day'] = df['sending_zone_datetime'].dt.dayofweek
+    df['receiving_zone_day'] = df['receiving_zone_datetime'].dt.dayofweek
+    df['sending_zone_hour'] = df['sending_zone_datetime'].dt.hour
+    df['receiving_zone_hour'] = df['receiving_zone_datetime'].dt.hour
+
+    # convert hour of the day and day of the week into sin and cos components because they are cyclical
+    df['sending_zone_day_cos'] = np.cos(2*np.pi*df['sending_zone_day']/7)
+    df['sending_zone_day_sin'] = np.sin(2*np.pi*df['sending_zone_day']/7)
+
+    df['receiving_zone_day_cos'] = np.cos(2*np.pi*df['receiving_zone_day']/7)
+    df['receiving_zone_day_sin'] = np.sin(2*np.pi*df['receiving_zone_day']/7)
+
+    df['sending_zone_hour_cos'] = np.cos(2*np.pi*df['sending_zone_hour']/24)
+    df['sending_zone_hour_sin'] = np.sin(2*np.pi*df['sending_zone_hour']/24)
+
+    df['receiving_zone_hour_cos'] = np.cos(2*np.pi*df['receiving_zone_hour']/24)
+    df['receiving_zone_hour_sin'] = np.sin(2*np.pi*df['receiving_zone_hour']/24)
+    
+    df['kernel_version'] = df['vm_1_kernel_release'].apply(kernel_version)
     df.sort_values(by=['iperf_timestamp', 'run_uri'], inplace=True, ascending=True)
     df = df.set_index('thedate')
     one_hot_machine_type = pd.get_dummies(df['vm_1_machine_type'], dtype='float32')
@@ -66,11 +132,41 @@ class DataUtil(object):
     
     one_hot_congestion_control = pd.get_dummies(df['tcp_congestion_control'], dtype='float32')
     df = df.join(one_hot_congestion_control)
-    one_hot_vm_1_os_info_trunc = pd.get_dummies(df['vm_1_os_info_trunc'], dtype='float32')
-    df = df.join(one_hot_vm_1_os_info_trunc)
+    
+    # Don't do the VM os type, that's too much
+    # one_hot_vm_1_os_info_trunc = pd.get_dummies(df['vm_1_os_info_trunc'], dtype='float32')
+    # df = df.join(one_hot_vm_1_os_info_trunc)
     
     
     print(df.columns)
+    
+    df['group_mean'] = df.groupby(['sending_zone',
+                       'receiving_zone',
+                       'tcp_max_receive_buffer',
+                       'vm_1_machine_type',
+                       'ip_type',
+                       'tcp_congestion_control',
+                       'vm_1_os_info_trunc'
+                        ])['iperf_throughput_32_threads'].transform('mean')
+    
+    df['group_stddev'] = df.groupby(['sending_zone',
+                           'receiving_zone',
+                           'tcp_max_receive_buffer',
+                           'vm_1_machine_type',
+                           'ip_type',
+                           'tcp_congestion_control',
+                           'vm_1_os_info_trunc'
+                            ])['iperf_throughput_32_threads'].transform('std')
+    
+    
+    df['group_id'] = df.groupby(['sending_zone',
+                           'receiving_zone',
+                           'tcp_max_receive_buffer',
+                           'vm_1_machine_type',
+                           'ip_type',
+                           'tcp_congestion_control',
+                           'vm_1_os_info_trunc'
+                            ])['iperf_throughput_32_threads'].ngroup()
     # TODO rethink how are are normalizing data
     # maybe we want to do it per group?
     # normalize data
@@ -85,8 +181,10 @@ class DataUtil(object):
     df[['iperf_throughput_1_thread']] /= std
     
     mean = df['iperf_throughput_32_threads'].mean(axis=0)
+    self.iperf_32_thread_mean = mean
     df[['iperf_throughput_32_threads']] = df[['iperf_throughput_32_threads']] - mean
     std = df['iperf_throughput_32_threads'].std(axis=0)
+    self.iperf_32_thread_std = std
     df[['iperf_throughput_32_threads']] /= std
 
     mean = df['tcp_max_receive_buffer'].mean(axis=0)
@@ -94,36 +192,68 @@ class DataUtil(object):
     std = df['tcp_max_receive_buffer'].std(axis=0)
     df[['tcp_max_receive_buffer']] /= std
     
-    mean = df['n1-standard-2'].mean(axis=0)
-    df[['n1-standard-2']] = df[['n1-standard-2']] - mean
-    std = df['n1-standard-2'].std(axis=0)
-    df[['n1-standard-2']] /= std
+    mean = df['kernel_version'].mean(axis=0)
+    df[['kernel_version']] = df[['kernel_version']] - mean
+    std = df['kernel_version'].std(axis=0)
+    df[['kernel_version']] /= std
     
-    mean = df['n1-standard-16'].mean(axis=0)
-    df[['n1-standard-16']] = df[['n1-standard-16']] - mean
-    std = df['n1-standard-16'].std(axis=0)
-    df[['n1-standard-16']] /= std
+#     mean = df['n1-standard-2'].mean(axis=0)
+#     df[['n1-standard-2']] = df[['n1-standard-2']] - mean
+#     std = df['n1-standard-2'].std(axis=0)
+#     df[['n1-standard-2']] /= std
     
-    mean = df['external'].mean(axis=0)
-    df[['external']] = df[['external']] - mean
-    std = df['external'].std(axis=0)
-    df[['external']] /= std
+#     mean = df['n1-standard-16'].mean(axis=0)
+#     df[['n1-standard-16']] = df[['n1-standard-16']] - mean
+#     std = df['n1-standard-16'].std(axis=0)
+#     df[['n1-standard-16']] /= std
     
-    mean = df['internal'].mean(axis=0)
-    df[['internal']] = df[['internal']] - mean
-    std = df['internal'].std(axis=0)
-    df[['internal']] /= std
+#     mean = df['external'].mean(axis=0)
+#     df[['external']] = df[['external']] - mean
+#     std = df['external'].std(axis=0)
+#     df[['external']] /= std
     
-    mean = df['bbr'].mean(axis=0)
-    df[['bbr']] = df[['bbr']] - mean
-    std = df['bbr'].std(axis=0)
-    df[['bbr']] /= std
+#     mean = df['internal'].mean(axis=0)
+#     df[['internal']] = df[['internal']] - mean
+#     std = df['internal'].std(axis=0)
+#     df[['internal']] /= std
     
-    mean = df['cubic'].mean(axis=0)
-    df[['cubic']] = df[['bbr']] - mean
-    std = df['cubic'].std(axis=0)
-    df[['cubic']] /= std
+#     mean = df['bbr'].mean(axis=0)
+#     df[['bbr']] = df[['bbr']] - mean
+#     std = df['bbr'].std(axis=0)
+#     df[['bbr']] /= std
     
+#     mean = df['cubic'].mean(axis=0)
+#     df[['cubic']] = df[['bbr']] - mean
+#     std = df['cubic'].std(axis=0)
+#     df[['cubic']] /= std
+    
+    df = df.query(query)
+    
+    self.columns   = ['pandas_datetime',
+                      'iperf_throughput_1_thread',
+                      'iperf_throughput_32_threads',
+                      'ping_average_latency',
+                      'tcp_max_receive_buffer',
+                      'sending_zone_day_cos',
+                      'sending_zone_day_sin',
+                      'receiving_zone_day_cos',
+                      'receiving_zone_day_sin',
+                      'sending_zone_hour_cos',
+                      'sending_zone_hour_sin',
+                      'receiving_zone_hour_cos',
+                      'receiving_zone_hour_sin', 
+                      'kernel_version',
+                      'group_mean',
+                      'group_stddev'
+                      # 'bbr', 'cubic',
+                      # 'n1-standard-16', 'n1-standard-2',
+                      # 'external', 'internal',
+                      # 'Ubuntu 14.04', 'Ubuntu 16.04', 'Ubuntu 18.04', 'Ubuntu 20.04',
+                      # 'vm_1_machine_type',
+                      # 'ip_type',
+                      # 'tcp_congestion_control',
+                      # 'vm_1_os_info_trunc'
+                     ]
 
     # sort and group
     gb = df.groupby(['sending_zone',
@@ -133,24 +263,8 @@ class DataUtil(object):
                      'ip_type',
                      'tcp_congestion_control',
                      'vm_1_os_info_trunc'], 
-                    as_index=False)[[
-#                                       'thedate',
-                                      # 'sending_zone',
-                                      # 'receiving_zone',
-                                      'pandas_datetime',
-                                      'iperf_throughput_1_thread',
-                                      'iperf_throughput_32_threads',
-                                      'tcp_max_receive_buffer',
-                                      'ping_average_latency',
-                                      'n1-standard-16', 'n1-standard-2',
-                                      'external', 'internal',
-                                      'bbr', 'cubic',
-                                      'Ubuntu 14.04', 'Ubuntu 16.04', 'Ubuntu 18.04', 'Ubuntu 20.04',
-                                      'vm_1_machine_type',
-                                      'ip_type',
-                                      'tcp_congestion_control',
-                                      'vm_1_os_info_trunc'
-                                    ]]
+                    as_index=False)[self.columns]
+    
     self.groups = list(gb.groups)
 
     self.rawdata = gb
@@ -164,6 +278,7 @@ class DataUtil(object):
     self.n         = None
     self.normalize = normalize
     self.scale     = np.ones(self.m)
+    
 
     # TODO normalize before split into groups
     self.normalize_data(normalize)
