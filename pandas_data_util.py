@@ -167,6 +167,8 @@ class DataUtil(object):
                            'tcp_congestion_control',
                            'vm_1_os_info_trunc'
                             ])['iperf_throughput_32_threads'].ngroup()
+    df = df.query(query)
+    df.to_csv('data/bq_results_reduced.csv')
     # TODO rethink how are are normalizing data
     # maybe we want to do it per group?
     # normalize data
@@ -188,8 +190,10 @@ class DataUtil(object):
     df[['iperf_throughput_32_threads']] /= std
 
     mean = df['tcp_max_receive_buffer'].mean(axis=0)
+    mean = mean + 0.000000001
     df[['tcp_max_receive_buffer']] = df[['tcp_max_receive_buffer']] - mean
     std = df['tcp_max_receive_buffer'].std(axis=0)
+    std = std + 0.000000001
     df[['tcp_max_receive_buffer']] /= std
     
     mean = df['kernel_version'].mean(axis=0)
@@ -226,8 +230,6 @@ class DataUtil(object):
 #     df[['cubic']] = df[['bbr']] - mean
 #     std = df['cubic'].std(axis=0)
 #     df[['cubic']] /= std
-    
-    df = df.query(query)
     
     self.columns   = ['pandas_datetime',
                       'iperf_throughput_1_thread',
